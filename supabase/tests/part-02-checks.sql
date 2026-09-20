@@ -36,6 +36,12 @@ DECLARE
   v_tiebreak_flag BOOLEAN;
   v_award_count INT;
   v_exception_caught BOOLEAN := FALSE;
+
+  -- Variables for Check 10 (Tiebreak rules)
+  v_tb_group_id UUID;
+  v_tb_t1 UUID; v_tb_t2 UUID; v_tb_t3 UUID; v_tb_t4 UUID;
+  v_m1 UUID; v_m2 UUID; v_m3 UUID; v_m4 UUID; v_m5 UUID; v_m6 UUID;
+  v_tb_count INT;
 BEGIN
   RAISE NOTICE 'Starting Part 2 SQL verification checks...';
 
@@ -262,6 +268,114 @@ BEGIN
   SELECT home_score INTO v_h_score FROM matches WHERE id = v_match_id;
   IF v_h_score <> (v_h_score_before + 1) THEN
     RAISE EXCEPTION 'CHECK 9e FAILED: Trigger failed to update match score after security hardening (expected home_score=%, got %).', (v_h_score_before + 1), v_h_score;
+  END IF;
+
+  -- --------------------------------------------------------------------------
+  -- CHECK 10: v_group_standings needs_tiebreak rules (Migration 13)
+  -- --------------------------------------------------------------------------
+  -- 10a. Unfinished group (matches scheduled, 0 finished) -> needs_tiebreak must be FALSE for all teams
+  INSERT INTO groups (year, name) VALUES (2, 'B') RETURNING id INTO v_tb_group_id;
+
+  INSERT INTO teams (code, name, year, batch, group_id) VALUES ('TB1', 'Tie Team 1', 2, 'TEST', v_tb_group_id) RETURNING id INTO v_tb_t1;
+  INSERT INTO teams (code, name, year, batch, group_id) VALUES ('TB2', 'Tie Team 2', 2, 'TEST', v_tb_group_id) RETURNING id INTO v_tb_t2;
+  INSERT INTO teams (code, name, year, batch, group_id) VALUES ('TB3', 'Tie Team 3', 2, 'TEST', v_tb_group_id) RETURNING id INTO v_tb_t3;
+  INSERT INTO teams (code, name, year, batch, group_id) VALUES ('TB4', 'Tie Team 4', 2, 'TEST', v_tb_group_id) RETURNING id INTO v_tb_t4;
+
+  INSERT INTO matches (round, group_id, year, home_team_id, away_team_id, status) VALUES (1, v_tb_group_id, 2, v_tb_t1, v_tb_t2, 'scheduled') RETURNING id INTO v_m1;
+  INSERT INTO matches (round, group_id, year, home_team_id, away_team_id, status) VALUES (1, v_tb_group_id, 2, v_tb_t2, v_tb_t3, 'scheduled') RETURNING id INTO v_m2;
+  INSERT INTO matches (round, group_id, year, home_team_id, away_team_id, status) VALUES (1, v_tb_group_id, 2, v_tb_t3, v_tb_t1, 'scheduled') RETURNING id INTO v_m3;
+
+  SELECT COUNT(*) INTO v_tb_count FROM v_group_standings WHERE group_id = v_tb_group_id AND needs_tiebreak IS TRUE;
+  IF v_tb_count <> 0 THEN
+    RAISE EXCEPTION 'CHECK 10a FAILED: Unfinished group had % teams flagged with needs_tiebreak=true (expected 0).', v_tb_count;
+  END IF;
+
+  -- 10b. 3-way tie for 1st place in finished 3-team group -> all 3 teams MUST be flagged
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m1, v_tb_t1, 'goal');
+  UPDATE matches SET status = 'finished' WHERE id = v_m1;
+
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m2, v_tb_t2, 'goal');
+  UPDATE matches SET status = 'finished' WHERE id = v_m2;
+
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m3, v_tb_t3, 'goal');
+  UPDATE matches SET status = 'finished' WHERE id = v_m3;
+
+  SELECT COUNT(*) INTO v_tb_count FROM v_group_standings WHERE group_id = v_tb_group_id AND needs_tiebreak IS TRUE;
+  IF v_tb_count <> 3 THEN
+    RAISE EXCEPTION 'CHECK 10b FAILED: 3-way 1st place tie expected 3 teams flagged with needs_tiebreak=true, got %.', v_tb_count;
+  END IF;
+
+  -- 10c. Setting tiebreak_rank on the tied teams clears the flag
+  UPDATE teams SET tiebreak_rank = 1 WHERE id = v_tb_t1;
+  UPDATE teams SET tiebreak_rank = 2 WHERE id = v_tb_t2;
+  UPDATE teams SET tiebreak_rank = 3 WHERE id = v_tb_t3;
+
+  SELECT COUNT(*) INTO v_tb_count FROM v_group_standings WHERE group_id = v_tb_group_id AND needs_tiebreak IS TRUE;
+  IF v_tb_count <> 0 THEN
+    RAISE EXCEPTION 'CHECK 10c FAILED: Setting tiebreak_rank did NOT clear needs_tiebreak flag (got % flagged).', v_tb_count;
+  END IF;
+
+  -- 10d. A tie only for 3rd place in a finished group is NOT flagged
+  -- Reset test group: delete test group matches/teams/group
+  DELETE FROM match_events WHERE match_id IN (v_m1, v_m2, v_m3);
+  DELETE FROM matches WHERE group_id = v_tb_group_id;
+  DELETE FROM teams WHERE group_id = v_tb_group_id;
+  DELETE FROM groups WHERE id = v_tb_group_id;
+
+  -- Create fresh 4-team group
+  INSERT INTO groups (year, name) VALUES (2, 'B') RETURNING id INTO v_tb_group_id;
+  INSERT INTO teams (code, name, year, batch, group_id) VALUES ('TB1', 'Tie Team 1', 2, 'TEST', v_tb_group_id) RETURNING id INTO v_tb_t1;
+  INSERT INTO teams (code, name, year, batch, group_id) VALUES ('TB2', 'Tie Team 2', 2, 'TEST', v_tb_group_id) RETURNING id INTO v_tb_t2;
+  INSERT INTO teams (code, name, year, batch, group_id) VALUES ('TB3', 'Tie Team 3', 2, 'TEST', v_tb_group_id) RETURNING id INTO v_tb_t3;
+  INSERT INTO teams (code, name, year, batch, group_id) VALUES ('TB4', 'Tie Team 4', 2, 'TEST', v_tb_group_id) RETURNING id INTO v_tb_t4;
+
+  -- Schedule 6 round-robin matches
+  INSERT INTO matches (round, group_id, year, home_team_id, away_team_id, status) VALUES (1, v_tb_group_id, 2, v_tb_t1, v_tb_t2, 'scheduled') RETURNING id INTO v_m1;
+  INSERT INTO matches (round, group_id, year, home_team_id, away_team_id, status) VALUES (1, v_tb_group_id, 2, v_tb_t1, v_tb_t3, 'scheduled') RETURNING id INTO v_m2;
+  INSERT INTO matches (round, group_id, year, home_team_id, away_team_id, status) VALUES (1, v_tb_group_id, 2, v_tb_t1, v_tb_t4, 'scheduled') RETURNING id INTO v_m3;
+  INSERT INTO matches (round, group_id, year, home_team_id, away_team_id, status) VALUES (1, v_tb_group_id, 2, v_tb_t2, v_tb_t3, 'scheduled') RETURNING id INTO v_m4;
+  INSERT INTO matches (round, group_id, year, home_team_id, away_team_id, status) VALUES (1, v_tb_group_id, 2, v_tb_t2, v_tb_t4, 'scheduled') RETURNING id INTO v_m5;
+  INSERT INTO matches (round, group_id, year, home_team_id, away_team_id, status) VALUES (1, v_tb_group_id, 2, v_tb_t3, v_tb_t4, 'scheduled') RETURNING id INTO v_m6;
+
+  -- Results:
+  -- TB1 beats TB2 (3-0), TB3 (3-0), TB4 (3-0) -> TB1: 9 pts (Rank 1)
+  -- TB2 beats TB3 (2-0), TB4 (2-0), loses to TB1 (0-3) -> TB2: 6 pts (Rank 2)
+  -- TB3 & TB4 draw 0-0, both lose to TB1 & TB2 -> TB3 & TB4: 1 pt each, GD -5, GF 0 (Tied for Rank 3 & 4)
+
+  -- m1: TB1 vs TB2 (3-0)
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m1, v_tb_t1, 'goal');
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m1, v_tb_t1, 'goal');
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m1, v_tb_t1, 'goal');
+  UPDATE matches SET status = 'finished' WHERE id = v_m1;
+
+  -- m2: TB1 vs TB3 (3-0)
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m2, v_tb_t1, 'goal');
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m2, v_tb_t1, 'goal');
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m2, v_tb_t1, 'goal');
+  UPDATE matches SET status = 'finished' WHERE id = v_m2;
+
+  -- m3: TB1 vs TB4 (3-0)
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m3, v_tb_t1, 'goal');
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m3, v_tb_t1, 'goal');
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m3, v_tb_t1, 'goal');
+  UPDATE matches SET status = 'finished' WHERE id = v_m3;
+
+  -- m4: TB2 vs TB3 (2-0)
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m4, v_tb_t2, 'goal');
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m4, v_tb_t2, 'goal');
+  UPDATE matches SET status = 'finished' WHERE id = v_m4;
+
+  -- m5: TB2 vs TB4 (2-0)
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m5, v_tb_t2, 'goal');
+  INSERT INTO match_events (match_id, team_id, type) VALUES (v_m5, v_tb_t2, 'goal');
+  UPDATE matches SET status = 'finished' WHERE id = v_m5;
+
+  -- m6: TB3 vs TB4 (0-0 draw)
+  UPDATE matches SET status = 'finished' WHERE id = v_m6;
+
+  SELECT COUNT(*) INTO v_tb_count FROM v_group_standings WHERE group_id = v_tb_group_id AND needs_tiebreak IS TRUE;
+  IF v_tb_count <> 0 THEN
+    RAISE EXCEPTION 'CHECK 10d FAILED: 3rd place tie was incorrectly flagged with needs_tiebreak=true (got % flagged, expected 0).', v_tb_count;
   END IF;
 
   RAISE NOTICE 'SUCCESS: All Part 2 database verification checks passed!';
