@@ -147,7 +147,7 @@ BEGIN
           'scheduled'
         );
       END LOOP;
-    END BEGIN;
+    END;
   END LOOP;
 
   -- 4. Populate played matches & live match for ONE group (Year 1 Group A) to test views
