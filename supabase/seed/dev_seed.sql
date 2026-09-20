@@ -97,9 +97,9 @@ BEGIN
       FOR p IN 2..7 LOOP
         INSERT INTO players (team_id, name, jersey_no, is_gk)
         VALUES (v_team_id, v_code || ' Player ' || p, p, false);
-      END FOR;
-    END FOR;
-  END FOR;
+      END LOOP;
+    END LOOP;
+  END LOOP;
 
   -- 3. Schedule 80 Round 1 Group Stage Fixtures (10 matches x 8 groups)
   -- Helper block to insert 10 round-robin matches per group
@@ -146,9 +146,9 @@ BEGIN
           'Main Ground Pitch 1',
           'scheduled'
         );
-      END FOR;
+      END LOOP;
     END BEGIN;
-  END FOR;
+  END LOOP;
 
   -- 4. Populate played matches & live match for ONE group (Year 1 Group A) to test views
   v_t1 := v_teams_y1a[1];
