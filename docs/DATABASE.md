@@ -59,7 +59,18 @@ Row Level Security is enabled on **all 9 tables**:
 
 ---
 
-## 5. How to Apply & Test
+## 5. Security Advisor
+
+### Hardened Settings (Migration 12)
+- **`function_search_path_mutable`:** Fixed by setting `search_path = public` on `public.validate_match_event()`, `public.set_updated_at()`, `public.get_top_scorers()`, `public.get_golden_glove()`, and `public.get_best_players()`.
+- **Trigger Function Permission Revocation:** Direct execution of internal trigger functions (`log_audit_event()`, `recalc_match_score()`, `validate_match_event()`, and `set_updated_at()`) via the Supabase Data API has been revoked from `PUBLIC`, `anon`, and `authenticated` roles. Database triggers continue to function normally because Postgres checks execution privileges at trigger creation time.
+
+### Accepted Advisor Warning
+- **`is_admin()` Security Definer Function:** The warning for `public.is_admin()` is intentionally accepted. Row Level Security (RLS) write policies across all public tables require signed-in `authenticated` (and `anon`) callers to evaluate `is_admin()` to determine write permissions. `is_admin()` is a read-only query that strictly checks if `auth.uid()` exists in `public.admins` and returns a boolean value without exposing sensitive data.
+
+---
+
+## 6. How to Apply & Test
 
 ### Applying Migrations
 Apply migrations using Supabase CLI:
