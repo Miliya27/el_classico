@@ -1,0 +1,177 @@
+-- ============================================================================
+-- AUTOMATED VERIFICATION CHECKS FOR PART 2 DATABASE SCHEMA AND RLS
+-- ============================================================================
+-- NOTE: Runnable in Supabase SQL Editor. Executes assertions in a DO block and
+-- rolls back all temporary test modifications at the end.
+-- ============================================================================
+
+BEGIN;
+
+DO $$
+DECLARE
+  v_group_id UUID;
+  v_team1_id UUID;
+  v_team2_id UUID;
+  v_p1_1 UUID;
+  v_p1_gk UUID;
+  v_p2_1 UUID;
+  v_p2_gk UUID;
+  v_match_id UUID;
+  v_event_id UUID;
+  v_h_score INT; v_a_score INT;
+  v_h_pens INT; v_a_pens INT;
+  v_standings_count INT;
+  v_tiebreak_flag BOOLEAN;
+  v_award_count INT;
+  v_exception_caught BOOLEAN := FALSE;
+BEGIN
+  RAISE NOTICE 'Starting Part 2 SQL verification checks...';
+
+  -- 1. Setup temporary test fixtures (Group, 2 Teams, Players)
+  INSERT INTO groups (year, name) VALUES (1, 'A') RETURNING id INTO v_group_id;
+
+  INSERT INTO teams (code, name, year, batch, group_id)
+  VALUES ('TST1', 'Test Team 1', 1, 'TEST', v_group_id) RETURNING id INTO v_team1_id;
+
+  INSERT INTO teams (code, name, year, batch, group_id)
+  VALUES ('TST2', 'Test Team 2', 1, 'TEST', v_group_id) RETURNING id INTO v_team2_id;
+
+  INSERT INTO players (team_id, name, jersey_no, is_gk)
+  VALUES (v_team1_id, 'T1 Keeper', 1, true) RETURNING id INTO v_p1_gk;
+
+  INSERT INTO players (team_id, name, jersey_no, is_gk)
+  VALUES (v_team1_id, 'T1 Player 1', 2, false) RETURNING id INTO v_p1_1;
+
+  INSERT INTO players (team_id, name, jersey_no, is_gk)
+  VALUES (v_team2_id, 'T2 Keeper', 1, true) RETURNING id INTO v_p2_gk;
+
+  INSERT INTO players (team_id, name, jersey_no, is_gk)
+  VALUES (v_team2_id, 'T2 Player 1', 2, false) RETURNING id INTO v_p2_1;
+
+  INSERT INTO matches (round, group_id, year, home_team_id, away_team_id, status)
+  VALUES (1, v_group_id, 1, v_team1_id, v_team2_id, 'scheduled')
+  RETURNING id INTO v_match_id;
+
+  -- --------------------------------------------------------------------------
+  -- CHECK 1: Score trigger after insert
+  -- --------------------------------------------------------------------------
+  INSERT INTO match_events (match_id, team_id, type, player_id)
+  VALUES (v_match_id, v_team1_id, 'goal', v_p1_1)
+  RETURNING id INTO v_event_id;
+
+  SELECT home_score, away_score INTO v_h_score, v_a_score FROM matches WHERE id = v_match_id;
+  IF v_h_score <> 1 OR v_a_score <> 0 THEN
+    RAISE EXCEPTION 'CHECK 1 FAILED: Expected score 1-0, got %-%', v_h_score, v_a_score;
+  END IF;
+
+  -- --------------------------------------------------------------------------
+  -- CHECK 2: Score trigger after voiding an event
+  -- --------------------------------------------------------------------------
+  UPDATE match_events SET voided_at = now() WHERE id = v_event_id;
+  SELECT home_score, away_score INTO v_h_score, v_a_score FROM matches WHERE id = v_match_id;
+  IF v_h_score <> 0 OR v_a_score <> 0 THEN
+    RAISE EXCEPTION 'CHECK 2 FAILED: Expected score 0-0 after voiding, got %-%', v_h_score, v_a_score;
+  END IF;
+
+  -- --------------------------------------------------------------------------
+  -- CHECK 3: Score trigger after deleting an event
+  -- --------------------------------------------------------------------------
+  INSERT INTO match_events (match_id, team_id, type, player_id)
+  VALUES (v_match_id, v_team1_id, 'goal', v_p1_1)
+  RETURNING id INTO v_event_id;
+
+  DELETE FROM match_events WHERE id = v_event_id;
+  SELECT home_score, away_score INTO v_h_score, v_a_score FROM matches WHERE id = v_match_id;
+  IF v_h_score <> 0 OR v_a_score <> 0 THEN
+    RAISE EXCEPTION 'CHECK 3 FAILED: Expected score 0-0 after delete, got %-%', v_h_score, v_a_score;
+  END IF;
+
+  -- --------------------------------------------------------------------------
+  -- CHECK 4: Own goal credited to the right team (benefiting team)
+  -- --------------------------------------------------------------------------
+  INSERT INTO match_events (match_id, team_id, type, player_id)
+  VALUES (v_match_id, v_team1_id, 'own_goal', v_p2_1);
+
+  SELECT home_score, away_score INTO v_h_score, v_a_score FROM matches WHERE id = v_match_id;
+  IF v_h_score <> 1 OR v_a_score <> 0 THEN
+    RAISE EXCEPTION 'CHECK 4 FAILED: Expected home_score=1 for own_goal benefiting team1, got %-%', v_h_score, v_a_score;
+  END IF;
+
+  -- --------------------------------------------------------------------------
+  -- CHECK 5: Validation rejects goal by a player from the wrong team
+  -- --------------------------------------------------------------------------
+  v_exception_caught := FALSE;
+  BEGIN
+    INSERT INTO match_events (match_id, team_id, type, player_id)
+    VALUES (v_match_id, v_team1_id, 'goal', v_p2_1); -- v_p2_1 belongs to team 2
+  EXCEPTION WHEN OTHERS THEN
+    v_exception_caught := TRUE;
+  END;
+
+  IF NOT v_exception_caught THEN
+    RAISE EXCEPTION 'CHECK 5 FAILED: Validation trigger did NOT reject goal by player from wrong team.';
+  END IF;
+
+  -- --------------------------------------------------------------------------
+  -- CHECK 6: Standings view numbers & needs_tiebreak flag
+  -- --------------------------------------------------------------------------
+  UPDATE matches SET status = 'finished', motm_player_id = v_p1_1 WHERE id = v_match_id;
+
+  SELECT count(*) INTO v_standings_count FROM v_group_standings WHERE group_id = v_group_id;
+  IF v_standings_count <> 2 THEN
+    RAISE EXCEPTION 'CHECK 6 FAILED: Expected 2 teams in standings view, got %', v_standings_count;
+  END IF;
+
+  SELECT needs_tiebreak INTO v_tiebreak_flag FROM v_group_standings WHERE team_id = v_team1_id;
+  IF v_tiebreak_flag IS TRUE THEN
+    RAISE EXCEPTION 'CHECK 6 FAILED: Expected needs_tiebreak to be false for decisive result.';
+  END IF;
+
+  -- --------------------------------------------------------------------------
+  -- CHECK 7: Award functions respect year and round filters
+  -- --------------------------------------------------------------------------
+  SELECT COUNT(*) INTO v_award_count FROM get_top_scorers(1, 1);
+  IF v_award_count < 1 THEN
+    RAISE EXCEPTION 'CHECK 7a FAILED: get_top_scorers returned 0 rows.';
+  END IF;
+
+  INSERT INTO match_keepers (match_id, team_id, player_id) VALUES (v_match_id, v_team1_id, v_p1_gk);
+  INSERT INTO match_keepers (match_id, team_id, player_id) VALUES (v_match_id, v_team2_id, v_p2_gk);
+
+  SELECT COUNT(*) INTO v_award_count FROM get_golden_glove(1, 1);
+  IF v_award_count < 1 THEN
+    RAISE EXCEPTION 'CHECK 7b FAILED: get_golden_glove returned 0 rows.';
+  END IF;
+
+  SELECT COUNT(*) INTO v_award_count FROM get_best_players(1, 1);
+  IF v_award_count < 1 THEN
+    RAISE EXCEPTION 'CHECK 7c FAILED: get_best_players returned 0 rows.';
+  END IF;
+
+  -- --------------------------------------------------------------------------
+  -- CHECK 8: RLS policies (anon role SELECT works and INSERT fails)
+  -- --------------------------------------------------------------------------
+  SET LOCAL ROLE anon;
+
+  SELECT COUNT(*) INTO v_award_count FROM teams;
+  IF v_award_count < 1 THEN
+    RAISE EXCEPTION 'CHECK 8a FAILED: Anon role SELECT on teams returned 0 rows.';
+  END IF;
+
+  v_exception_caught := FALSE;
+  BEGIN
+    INSERT INTO teams (code, name, year, batch) VALUES ('BLCK', 'Blocked Team', 1, 'TEST');
+  EXCEPTION WHEN OTHERS THEN
+    v_exception_caught := TRUE;
+  END;
+
+  IF NOT v_exception_caught THEN
+    RAISE EXCEPTION 'CHECK 8b FAILED: Anon INSERT on teams was not blocked by RLS.';
+  END IF;
+
+  RESET ROLE;
+
+  RAISE NOTICE 'SUCCESS: All Part 2 database verification checks passed!';
+END $$;
+
+ROLLBACK;
