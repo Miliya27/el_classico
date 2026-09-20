@@ -1,8 +1,19 @@
 -- ============================================================================
--- AUTOMATED VERIFICATION CHECKS FOR PART 2 DATABASE SCHEMA AND RLS
+-- DEV ONLY - AUTOMATED VERIFICATION CHECKS FOR PART 2 DATABASE SCHEMA AND RLS
 -- ============================================================================
--- NOTE: Runnable in Supabase SQL Editor. Executes assertions in a DO block and
--- rolls back all temporary test modifications at the end.
+-- WARNING: DEV ONLY! NEVER RUN THIS SCRIPT ON A PROJECT WITH REAL DATA!
+--
+-- HOW TO RUN:
+-- Open Supabase Dashboard -> SQL Editor, paste this entire script, and click RUN.
+--
+-- TRANSACTION SAFETY & ROLLBACK GUARANTEE:
+-- This script runs inside an explicit transaction block (BEGIN; ... ROLLBACK;).
+-- 1. If any assertion fails (RAISE EXCEPTION), PostgreSQL automatically aborts
+--    the transaction and rolls back ALL changes immediately.
+-- 2. If all assertions pass, the script finishes at the explicit ROLLBACK;
+--    command, which rolls back ALL changes (including table cleanup & test data).
+-- In both cases, ZERO changes are committed, and any pre-existing database/seed
+-- data is 100% restored.
 -- ============================================================================
 
 BEGIN;
@@ -27,7 +38,22 @@ DECLARE
 BEGIN
   RAISE NOTICE 'Starting Part 2 SQL verification checks...';
 
-  -- 1. Setup temporary test fixtures (Group, 2 Teams, Players)
+  -- --------------------------------------------------------------------------
+  -- STEP 0: Clean slate data cleanup (Safe inside transaction)
+  -- Guarantees clean test execution whether dev_seed.sql was run or not.
+  -- --------------------------------------------------------------------------
+  DELETE FROM match_events;
+  DELETE FROM match_keepers;
+  DELETE FROM media;
+  DELETE FROM matches;
+  DELETE FROM players;
+  DELETE FROM teams;
+  DELETE FROM groups;
+  DELETE FROM audit_log;
+
+  -- --------------------------------------------------------------------------
+  -- STEP 1: Setup isolated test fixtures (1 Group, 2 Teams, Players, 1 Match)
+  -- --------------------------------------------------------------------------
   INSERT INTO groups (year, name) VALUES (1, 'A') RETURNING id INTO v_group_id;
 
   INSERT INTO teams (code, name, year, batch, group_id)
@@ -113,8 +139,12 @@ BEGIN
   END IF;
 
   -- --------------------------------------------------------------------------
-  -- CHECK 6: Standings view numbers & needs_tiebreak flag
+  -- CHECK 6: Standings view numbers, finished match update, & goal event creation
   -- --------------------------------------------------------------------------
+  -- Insert a valid, active goal event for player v_p1_1 (used for award tests)
+  INSERT INTO match_events (match_id, team_id, type, player_id)
+  VALUES (v_match_id, v_team1_id, 'goal', v_p1_1);
+
   UPDATE matches SET status = 'finished', motm_player_id = v_p1_1 WHERE id = v_match_id;
 
   SELECT count(*) INTO v_standings_count FROM v_group_standings WHERE group_id = v_group_id;
@@ -174,4 +204,5 @@ BEGIN
   RAISE NOTICE 'SUCCESS: All Part 2 database verification checks passed!';
 END $$;
 
+-- Explicitly rollback transaction so ZERO changes are committed to database
 ROLLBACK;
