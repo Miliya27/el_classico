@@ -201,6 +201,68 @@ BEGIN
 
   RESET ROLE;
 
+  -- --------------------------------------------------------------------------
+  -- CHECK 9: Security Hardening Revokes & Trigger Execution
+  -- --------------------------------------------------------------------------
+  -- 9a. Verify anon role cannot directly execute internal trigger functions
+  SET LOCAL ROLE anon;
+
+  v_exception_caught := FALSE;
+  BEGIN
+    PERFORM recalc_match_score();
+  EXCEPTION WHEN OTHERS THEN
+    v_exception_caught := TRUE;
+  END;
+
+  IF NOT v_exception_caught THEN
+    RAISE EXCEPTION 'CHECK 9a FAILED: Direct execution of recalc_match_score() was NOT blocked for role anon.';
+  END IF;
+
+  v_exception_caught := FALSE;
+  BEGIN
+    PERFORM log_audit_event();
+  EXCEPTION WHEN OTHERS THEN
+    v_exception_caught := TRUE;
+  END;
+
+  IF NOT v_exception_caught THEN
+    RAISE EXCEPTION 'CHECK 9b FAILED: Direct execution of log_audit_event() was NOT blocked for role anon.';
+  END IF;
+
+  -- 9b. Verify anon SELECT on teams still works after security hardening
+  SELECT COUNT(*) INTO v_award_count FROM teams;
+  IF v_award_count < 1 THEN
+    RAISE EXCEPTION 'CHECK 9c FAILED: Anon SELECT on teams returned 0 rows.';
+  END IF;
+
+  RESET ROLE;
+
+  -- 9c. Verify authenticated role cannot directly execute internal trigger functions
+  SET LOCAL ROLE authenticated;
+
+  v_exception_caught := FALSE;
+  BEGIN
+    PERFORM recalc_match_score();
+  EXCEPTION WHEN OTHERS THEN
+    v_exception_caught := TRUE;
+  END;
+
+  IF NOT v_exception_caught THEN
+    RAISE EXCEPTION 'CHECK 9d FAILED: Direct execution of recalc_match_score() was NOT blocked for role authenticated.';
+  END IF;
+
+  RESET ROLE;
+
+  -- 9d. Verify trigger execution as postgres/default role still updates match score
+  -- Insert a goal event and verify home_score is recalculated via trigger
+  INSERT INTO match_events (match_id, team_id, type, player_id)
+  VALUES (v_match_id, v_team1_id, 'goal', v_p1_1);
+
+  SELECT home_score INTO v_h_score FROM matches WHERE id = v_match_id;
+  IF v_h_score <> 2 THEN
+    RAISE EXCEPTION 'CHECK 9e FAILED: Trigger failed to update match score after security hardening (expected home_score=2, got %).', v_h_score;
+  END IF;
+
   RAISE NOTICE 'SUCCESS: All Part 2 database verification checks passed!';
 END $$;
 
