@@ -49,7 +49,7 @@ export function TeamForm({ groups, teamToEdit, onSuccess, onCancel }: TeamFormPr
     }
 
     return (
-        <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4">
+        <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold text-slate-100">
                 {isEdit ? `Edit Team: ${teamToEdit?.code}` : 'Add New Team'}
             </h3>
@@ -155,6 +155,44 @@ export function TeamForm({ groups, teamToEdit, onSuccess, onCancel }: TeamFormPr
                 </button>
             </div>
         </form>
+    );
+}
+
+export function EditTeamButton({ team, groups }: { team: TeamWithGroup; groups: GroupItem[] }) {
+    const [editing, setEditing] = useState(false);
+
+    if (editing) {
+        return (
+            <>
+                <button
+                    type="button"
+                    onClick={() => setEditing(false)}
+                    className="px-2.5 py-1 rounded text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+                >
+                    Cancel
+                </button>
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="w-full max-w-2xl">
+                        <TeamForm
+                            groups={groups}
+                            teamToEdit={team}
+                            onSuccess={() => setEditing(false)}
+                            onCancel={() => setEditing(false)}
+                        />
+                    </div>
+                </div>
+            </>
+        );
+    }
+
+    return (
+        <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="px-2.5 py-1 rounded text-xs font-medium bg-emerald-950/40 text-emerald-300 border border-emerald-800/40 hover:bg-emerald-900/60 transition-colors"
+        >
+            Edit
+        </button>
     );
 }
 
