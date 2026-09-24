@@ -8,7 +8,7 @@ interface TeamOption {
     id: string;
     code: string;
     name: string;
-    year: number;
+    year: number | null;
 }
 
 interface PlayerWithTeam extends Tables<'players'> {

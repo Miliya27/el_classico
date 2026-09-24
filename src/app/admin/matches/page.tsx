@@ -40,7 +40,9 @@ export default async function AdminMatchesPage({ searchParams }: PageProps) {
     if (roundParam) matchesQuery = matchesQuery.eq('round', parseInt(roundParam, 10));
     if (yearParam) matchesQuery = matchesQuery.eq('year', parseInt(yearParam, 10));
     if (groupParam) matchesQuery = matchesQuery.eq('group_id', groupParam);
-    if (statusParam) matchesQuery = matchesQuery.eq('status', statusParam as any);
+    if (statusParam && ['scheduled', 'live', 'half_time', 'finished'].includes(statusParam)) {
+        matchesQuery = matchesQuery.eq('status', statusParam as 'scheduled' | 'live' | 'half_time' | 'finished');
+    }
 
     const [groupsRes, teamsRes, matchesRes] = await Promise.all([
         supabase.from('groups').select('id, name, year').order('year').order('name'),
@@ -192,9 +194,9 @@ export default async function AdminMatchesPage({ searchParams }: PageProps) {
                                             </td>
                                             <td className="px-3 py-3">
                                                 <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider ${m.status === 'live' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse' :
-                                                        m.status === 'half_time' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' :
-                                                            m.status === 'finished' ? 'bg-slate-800 text-slate-300' :
-                                                                'bg-slate-900 border border-slate-800 text-slate-400'
+                                                    m.status === 'half_time' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' :
+                                                        m.status === 'finished' ? 'bg-slate-800 text-slate-300' :
+                                                            'bg-slate-900 border border-slate-800 text-slate-400'
                                                     }`}>
                                                     {m.status}
                                                 </span>

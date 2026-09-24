@@ -44,14 +44,22 @@ export default async function AdminAuditLogPage({ searchParams }: PageProps) {
     const logs = rawLogs ?? [];
 
     // 3. Attempt to fetch user emails from auth.users (User attempt requirement)
-    let userEmailMap = new Map<string, string>();
+    const userEmailMap = new Map<string, string>();
     let emailJoinAccessible = false;
 
     try {
-        const userIds = Array.from(new Set(logs.map((l) => l.user_id).filter(Boolean)));
+        const userIds = Array.from(new Set(logs.map((l) => l.user_id).filter((id): id is string => Boolean(id))));
         if (userIds.length > 0) {
-            // Attempt querying auth.users schema or view
-            const { data: userData, error: userError } = await (supabase as any)
+            const authClient = supabase as unknown as {
+                schema: (s: string) => {
+                    from: (t: string) => {
+                        select: (c: string) => {
+                            in: (col: string, vals: string[]) => Promise<{ data: { id: string; email: string }[] | null; error: unknown }>;
+                        };
+                    };
+                };
+            };
+            const { data: userData, error: userError } = await authClient
                 .schema('auth')
                 .from('users')
                 .select('id, email')
@@ -66,7 +74,7 @@ export default async function AdminAuditLogPage({ searchParams }: PageProps) {
                 }
             }
         }
-    } catch (e) {
+    } catch {
         // auth.users is protected by Postgres security privileges for anon/authenticated roles
         emailJoinAccessible = false;
     }
@@ -127,8 +135,8 @@ export default async function AdminAuditLogPage({ searchParams }: PageProps) {
                                                 </td>
                                                 <td className="px-3 py-3">
                                                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${log.action === 'INSERT' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                                                            log.action === 'UPDATE' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' :
-                                                                'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                                        log.action === 'UPDATE' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' :
+                                                            'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                                                         }`}>
                                                         {log.action}
                                                     </span>

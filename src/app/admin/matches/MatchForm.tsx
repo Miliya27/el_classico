@@ -14,7 +14,7 @@ interface TeamOption {
     id: string;
     code: string;
     name: string;
-    year: number;
+    year: number | null;
 }
 
 interface MatchWithTeams extends Tables<'matches'> {
