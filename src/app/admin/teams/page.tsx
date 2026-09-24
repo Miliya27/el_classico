@@ -1,7 +1,7 @@
 import { requireAdmin } from '@/lib/auth/admin';
 import { createClient } from '@/lib/supabase/server';
 import { AdminNav } from '@/components/AdminNav';
-import { TeamForm, DeleteTeamButton } from './TeamForm';
+import { TeamForm, EditTeamButton, DeleteTeamButton } from './TeamForm';
 import Link from 'next/link';
 
 export const revalidate = 0;
@@ -96,7 +96,8 @@ export default async function AdminTeamsPage() {
                                             <td className="px-3 py-3 text-center text-slate-300 font-mono">
                                                 {team.match_count}
                                             </td>
-                                            <td className="px-4 py-3 text-right">
+                                            <td className="px-4 py-3 text-right flex items-center justify-end gap-2">
+                                                <EditTeamButton team={team} groups={groups} />
                                                 <DeleteTeamButton teamId={team.id} teamCode={team.code} />
                                             </td>
                                         </tr>
